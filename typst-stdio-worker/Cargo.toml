@@ -1,0 +1,33 @@
+[package]
+name = "typst-stdio-worker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+typst = "0.14"
+typst-render = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
+fontdb = "0.16"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+comemo = "0.5"
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+signal-hook = "0.3"
+ureq = "3"
+flate2 = "1"
+memmap2 = "0.9"
+tar = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# strip = "symbols"
+# Keep unwinding (default panic = "unwind") so a panic still surfaces stderr
+# diagnostics to the parent process before the worker exits.
