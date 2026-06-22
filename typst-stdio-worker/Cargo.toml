@@ -6,8 +6,9 @@ edition = "2024"
 [dependencies]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-typst = "0.14"
-typst-render = "0.14"
+typst = "0.15"
+typst-layout = "0.15"
+typst-render = "0.15"
 image = { version = "0.25", default-features = false, features = ["png"] }
 fontdb = "0.16"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

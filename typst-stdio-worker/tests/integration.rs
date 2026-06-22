@@ -340,9 +340,8 @@ fn worker_returns_warnings_with_success() {
     let mut ready_line = String::new();
     reader.read_line(&mut ready_line).unwrap();
 
-    // `csv.decode` is deprecated in typst 0.14, scheduled for removal in 0.15.
-    // It compiles fine but emits a deprecation warning.
-    let req = r##"{"source":"#let _ = csv.decode(\"a,b\n\")\nhello","template":"raw"}"##;
+    // Typst 0.15 deprecates zero in numbering systems that cannot represent it.
+    let req = r##"{"source":"#numbering(\"harazi\", 0)\nhello","template":"raw"}"##;
     writeln!(stdin, "{}", req).unwrap();
     stdin.flush().unwrap();
 

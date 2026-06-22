@@ -4,14 +4,42 @@ use std::path::{Path, PathBuf};
 use chrono::Datelike;
 use flate2::read::GzDecoder;
 use typst::diag::{FileError, FileResult, PackageError};
-use typst::foundations::{Bytes, Datetime};
+use typst::foundations::{Bytes, Datetime, Duration};
 use typst::syntax::package::PackageSpec;
-use typst::syntax::{FileId, Source, VirtualPath};
+use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt};
 
 use crate::i18n;
+
+fn package_spec(id: &FileId) -> Option<&PackageSpec> {
+    match id.root() {
+        VirtualRoot::Package(spec) => Some(spec),
+        VirtualRoot::Project => None,
+    }
+}
+
+fn package_label(id: &FileId) -> String {
+    package_spec(id)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "not package file".to_string())
+}
+
+fn file_id(spec: Option<&PackageSpec>, vpath: VirtualPath) -> FileId {
+    let root = spec
+        .cloned()
+        .map(VirtualRoot::Package)
+        .unwrap_or(VirtualRoot::Project);
+    FileId::new(RootedPath::new(root, vpath))
+}
+
+fn main_file_id() -> FileId {
+    file_id(
+        None,
+        VirtualPath::new("main.typ").expect("\"main.typ\" is a valid virtual path"),
+    )
+}
 
 pub struct TypstBotWorld {
     library: LazyHash<Library>,
@@ -92,10 +120,7 @@ impl TypstBotWorld {
         drop(file_cache);
 
         let font_count = fonts.len();
-        let source = Source::new(
-            FileId::new(None, VirtualPath::new("main.typ")),
-            String::new(),
-        );
+        let source = Source::new(main_file_id(), String::new());
 
         let canonical_package_dir = preview_package_dir.and_then(|dir| {
             if allow_download {
@@ -156,10 +181,7 @@ impl TypstBotWorld {
     }
 
     pub fn update_source(&mut self, text: String) {
-        self.source = Source::new(
-            FileId::new(None, VirtualPath::new("main.typ")),
-            text,
-        );
+        self.source = Source::new(main_file_id(), text);
     }
 
     pub fn main_id(&self) -> FileId {
@@ -282,7 +304,7 @@ impl TypstBotWorld {
             ))));
         }
 
-        let relative: &Path = vpath.as_rootless_path();
+        let relative = Path::new(vpath.get_without_slash());
         // Cheap pre-flight: reject any traversal segment outright. VirtualPath
         // should already normalize but we double-check before touching the FS.
         for component in relative.components() {
@@ -355,14 +377,14 @@ impl typst::World for TypstBotWorld {
     fn source(&self, id: FileId) -> FileResult<Source> {
         tracing::debug!(
             name: "typst_world_access",
-            package = %id.package().map(|s| s.to_string()).unwrap_or_else(|| "not package file".to_string()),
-            file_path = %id.vpath().as_rootless_path().to_str().unwrap_or("unknown")
+            package = %package_label(&id),
+            file_path = %id.vpath().get_without_slash()
         , "{}", i18n::log_source_access());
         if id == self.source.id() {
             return Ok(self.source.clone());
         }
 
-        if let Some(spec) = id.package() {
+        if let Some(spec) = package_spec(&id) {
             let path = self.resolve_package_path(spec, id.vpath())?;
             let text = std::fs::read_to_string(&path).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => FileError::NotFound(path.clone()),
@@ -372,16 +394,16 @@ impl typst::World for TypstBotWorld {
             return Ok(Source::new(id, text));
         }
 
-        Err(FileError::NotFound(id.vpath().as_rootless_path().into()))
+        Err(FileError::NotFound(PathBuf::from(id.vpath().get_without_slash())))
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
         tracing::debug!(
             name: "typst_world_access",
-            package = %id.package().map(|s| s.to_string()).unwrap_or_else(|| "not package file".to_string()),
-            file_path = %id.vpath().as_rootless_path().to_str().unwrap_or("unknown")
+            package = %package_label(&id),
+            file_path = %id.vpath().get_without_slash()
         , "{}", i18n::log_file_access());
-        if let Some(spec) = id.package() {
+        if let Some(spec) = package_spec(&id) {
             let path = self.resolve_package_path(spec, id.vpath())?;
             let data = std::fs::read(&path).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => FileError::NotFound(path.clone()),
@@ -391,25 +413,22 @@ impl typst::World for TypstBotWorld {
             return Ok(Bytes::new(data));
         }
 
-        Err(FileError::NotFound(id.vpath().as_rootless_path().into()))
+        Err(FileError::NotFound(PathBuf::from(id.vpath().get_without_slash())))
     }
 
     fn font(&self, index: usize) -> Option<Font> {
         self.fonts.get(index).cloned()
     }
 
-    fn today(&self, offset: Option<i64>) -> Option<Datetime> {
-        let now = if let Some(hours) = offset {
-            let tz = chrono::FixedOffset::east_opt((hours as i32) * 3600)?;
-            chrono::Utc::now().with_timezone(&tz).naive_local()
+    fn today(&self, offset: Option<Duration>) -> Option<Datetime> {
+        let date = if let Some(offset) = offset {
+            let adjusted = chrono::Utc::now()
+                + chrono::Duration::milliseconds((offset.seconds() * 1000.0) as i64);
+            adjusted.date_naive()
         } else {
-            chrono::Local::now().naive_local()
+            chrono::Local::now().date_naive()
         };
 
-        Datetime::from_ymd(
-            now.date().year(),
-            now.date().month0() as u8 + 1,
-            now.date().day0() as u8 + 1,
-        )
+        Datetime::from_ymd(date.year(), date.month() as u8, date.day() as u8)
     }
 }

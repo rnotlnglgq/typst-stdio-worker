@@ -1,8 +1,11 @@
 /// Compilation and rendering of typst source to PNG.
 use image::ImageEncoder;
 use typst::World;
+use typst::WorldExt;
 use typst::diag::{Severity, SourceDiagnostic};
-use typst::layout::PagedDocument;
+use typst::utils::Scalar;
+use typst_layout::PagedDocument;
+use typst_render::RenderOptions;
 
 use crate::i18n;
 use crate::world::TypstBotWorld;
@@ -44,11 +47,11 @@ impl TypstBotWorld {
                 .collect::<Vec<_>>()
         })?;
 
-        if document.pages.is_empty() {
+        if document.pages().is_empty() {
             return Err(vec![CompileError::limit(ErrorCode::NoPages)]);
         }
 
-        let page_count = document.pages.len();
+        let page_count = document.pages().len();
         if page_count > max_pages {
             return Err(vec![CompileError::limit(ErrorCode::TooManyPages {
                 actual: page_count,
@@ -56,10 +59,14 @@ impl TypstBotWorld {
             })]);
         }
 
+        let render_opts = RenderOptions {
+            pixel_per_pt: Scalar::new(scale as f64),
+            ..Default::default()
+        };
         let pixmaps: Vec<_> = document
-            .pages
+            .pages()
             .iter()
-            .map(|page| typst_render::render(page, scale))
+            .map(|page| typst_render::render(page, &render_opts))
             .collect();
 
         let total_width = pixmaps.iter().map(|p| p.width()).max().unwrap_or(0);
@@ -141,8 +148,8 @@ fn diagnostic_to_message(
     };
 
     let raw_span = diag.span.id().and_then(|id| {
+        let range = world.range(diag.span)?;
         let source = world.source(id).ok()?;
-        let range = source.range(diag.span)?;
         let line = source.lines().byte_to_line(range.start)?;
         let column = source.lines().byte_to_column(range.start)?;
         Some((id == world.main_id(), line + 1, column + 1))
@@ -182,7 +189,7 @@ fn diagnostic_to_message(
         diag.message.to_string()
     };
 
-    let hints = diag.hints.iter().map(|h| h.to_string()).collect();
+    let hints = diag.hints.iter().map(|h| h.v.to_string()).collect();
 
     CompileError {
         kind,
